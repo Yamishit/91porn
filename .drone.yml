@@ -1,1 +1,102 @@
 
+kind: pipeline
+type: docker
+name: clannad-apitest-backend
+# trigger:
+#   branch:
+#     - master
+#     - dev
+trigger:  
+  ref:
+    - refs/heads/master
+    - refs/heads/dev
+    - refs/tags/*
+
+steps:
+- name: tag-docker
+  image: 10.225.20.184:16080/common/centos_go:1.0
+  when:
+    event:
+      - tag
+  commands:
+    - docker build -t $PLUGIN_REPO:$PLUGIN_TAGS .
+    - docker login 10.225.20.184:16080 -u $PLUGIN_USERNAME -p $PLUGIN_PASSWORD 
+    - docker push $PLUGIN_REPO:$PLUGIN_TAGS
+  settings:
+    registry: http://10.225.20.184:16080
+    repo: 10.225.20.184:16080/yokaqa/apitest-backend
+    username:
+      from_secret: harbor_username
+    password:
+      from_secret: harbor_passwd
+    insecure: true
+    tags:
+      - ${DRONE_TAG=latest}
+  volumes:
+    - name: dockersock
+      path: /var/run/docker.sock
+    - name: docker
+      path: /usr/bin/docker
+
+- name: dev-docker
+  image: plugins/docker
+  settings:
+    registry: http://10.225.20.184:16080
+    repo: 10.225.20.184:16080/yokaqa/apitest-backend
+    username:
+      from_secret: harbor_username
+    password:
+      from_secret: harbor_passwd
+    insecure: true
+    tags:
+      - PRE-LATEST
+  when:
+    branch: dev
+    event: 
+      - push
+
+
+- name: dev-deploy
+  image: 10.225.20.184:16080/common/centos_go:1.0
+  when:
+    branch: dev
+    event:
+      - push
+  commands:
+    - if [ "$(curl -sL -w '%{http_code}' 'http://10.225.21.223:8000/helm/server/update?env=/usr/local/bin&namespace=pre&release_name=yoka-apitest-backend&path=/home-ssd/clannad/k8s_helm/pre/yoka-apitest-backend' -o /dev/null)" == "200" ]; then echo "Success"; else curl https://www.google.com; fi
+
+
+- name: master-docker
+  image: plugins/docker
+  settings:
+    registry: http://10.225.20.184:16080
+    repo: 10.225.20.184:16080/yokaqa/apitest-backend 
+    username: 
+      from_secret: harbor_username
+    password: 
+      from_secret: harbor_passwd
+    insecure: true
+    tags: 
+      - RELEASE-LATEST
+  when:
+    branch: master
+    event: 
+      - push
+
+- name: master-deploy
+  image: 10.225.20.184:16080/common/centos_go:1.0
+  when:
+    branch: master
+    event:
+      - push
+  commands:
+    - if [ "$(curl -sL -w '%{http_code}' 'http://10.225.21.223:8000/helm/server/update?env=/usr/local/bin&namespace=release&release_name=yoka-apitest-backend&path=/home-ssd/clannad/k8s_helm/release/yoka-apitest-backend' -o /dev/null)" == "200" ]; then echo "Success"; else curl https://www.google.com; fi
+
+
+volumes:
+- name: dockersock
+  host:
+    path: /var/run/docker.sock
+- name: docker
+  host:
+    path: /usr/bin/docker
